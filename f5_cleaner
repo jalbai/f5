@@ -1,0 +1,82 @@
+---
+
+- name: Start Playbook
+  hosts: bigip
+  connection: local
+  gather_facts: no
+
+  vars:
+    - credentials:
+          server: bigip
+          user: <username>
+          password: <password>
+          validate_certs: no
+    - expired_ssl_client_profiles: []
+    - expired_ssl_cert_full_path: []
+    - expired_ssl_cert_name: []
+
+ tasks:
+    - name: Take time from local server
+      connection: local
+      shell: date '+%s'
+      register: date
+      no_log: true
+      
+    - name: Collect data about SSL certifications and SSL Client profiles
+      bigip_device_info:
+        gather_subset:
+          - client-ssl-profiles
+          - ssl-certs
+        provider: "{{credentials}}"
+      register: result
+      delegate_to: localhost
+      no_log: true
+
+    - name: Create a list of expired ssl certificates names and full path
+      set_fact:
+        expired_ssl_cert_full_path: "{{expired_ssl_cert_full_path}} + ['{{item.full_path}}'] "
+        expired_ssl_cert_name: "{{expired_ssl_cert_name}} + ['{{item.name}}'] "
+      when: (item.expiration_timestamp  < date|int)
+      loop: "{{result.ansible_facts.ansible_net_ssl_certs}}"
+      no_log: true
+
+    - name: Create a list of SSL client profiles which contains expired certificates
+      set_fact:
+        expired_ssl_client_profiles: "{{expired_ssl_client_profiles}} + ['{{item.name}}']"
+      when: (item.certificate_file in expired_ssl_cert_full_path)
+      loop: "{{result.ansible_facts.ansible_net_client_ssl_profiles}}"
+      no_log: true
+
+    - name: Print the list with the full_path or expired certificates
+      debug:
+        msg: "{{expired_ssl_cert_full_path}}"
+
+    - name: Print the list with the names of expired certificates
+      debug:
+        msg: "{{expired_ssl_cert_name}}"
+
+    - name: Print the list with profiles witch contains expired certificates
+      debug:
+        msg: "{{expired_ssl_client_profiles}}"
+
+    - name: Delete client SSL profiles that use expired ssl certifications
+      bigip_profile_client_ssl:
+        name: "{{item}}"
+        state: absent
+        provider: "{{credentials}}"
+      delegate_to: localhost
+      loop: "{{expired_ssl_client_profiles }}"
+
+    - name: Delete expired SSL certifications
+      bigip_ssl_certificate:
+         name: "{{item}}"
+         state: absent
+         provider: "{{credentials}}"
+      delegate_to: localhost
+      loop: "{{expired_ssl_cert_name }}"
+
+    - name: Save the running configuration of the BIG-IP
+      bigip_config:
+        save: yes
+        provider: "{{credentials}}"
+     delegate_to: localhost
