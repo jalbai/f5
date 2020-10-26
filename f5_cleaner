@@ -36,7 +36,7 @@
       set_fact:
         expired_ssl_cert_full_path: "{{expired_ssl_cert_full_path}} + ['{{item.full_path}}'] "
         expired_ssl_cert_name: "{{expired_ssl_cert_name}} + ['{{item.name}}'] "
-      when: (item.expiration_timestamp  < date|int)
+      when: (item.expiration_timestamp  < date.stdout|int)
       loop: "{{result.ansible_facts.ansible_net_ssl_certs}}"
       no_log: true
 
